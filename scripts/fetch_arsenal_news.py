@@ -66,24 +66,39 @@ OUT_RE = re.compile(
     re.I,
 )
 
+# Meta/roundup headlines that contain the word "transfer" but aren't
+# about a specific move (e.g. "Arsenal's transfer plans"). Excluded
+# unless a more specific verb is also present.
+GENERIC_RE = re.compile(
+    r"\btransfer (plans|window|news|rumours?|targets?|list|state of play|"
+    r"round-?up|latest|gossip)\b",
+    re.I,
+)
+SPECIFIC_VERB_RE = re.compile(
+    r"\b(sign|bid|loan|joins?|leaves?|complete|medical|agree)\b", re.I
+)
+
 # Capitalized word(s) -- candidate names/clubs in a headline.
 CAP_RE = re.compile(r"\b[A-Z][a-zA-Z]+(?:'s)?(?:\s[A-Z][a-zA-Z]+(?:'s)?){0,2}\b")
 
 # Clubs, competitions, outlets, and stray words that show up capitalized
 # in headlines but are never the player. Extend freely -- one line each.
 WORD_BLOCKLIST = {
-    "arsenal", "arsenal's", "bournemouth", "leverkusen", "besiktas",
+    "arsenal", "bournemouth", "leverkusen", "besiktas",
     "newcastle", "leeds", "chelsea", "liverpool", "city", "united", "real",
     "madrid", "barcelona", "psg", "bayern", "juventus", "inter", "milan",
     "sky", "bbc", "sport", "sports", "premier", "league", "la", "liga",
     "serie", "bundesliga", "ligue", "champions", "europa", "here", "we",
-    "go", "mikel", "arteta", "watch", "video", "report", "gossip",
+    "go", "mikel", "arteta", "watch", "video", "report", "gossip", "club",
+    "world", "cup",
 }
 
 
 def classify(title, summary):
     text = f"{title} {summary}"
     if not ARSENAL_RE.search(text):
+        return None
+    if GENERIC_RE.search(text) and not SPECIFIC_VERB_RE.search(text):
         return None
     if INJURY_RE.search(text) and not TRANSFER_RE.search(title):
         return None
@@ -96,22 +111,31 @@ def classify(title, summary):
 
 
 def extract_player_name(title):
-    """Pick the capitalized name/phrase closest to the transfer verb,
-    stripping out known club/competition/outlet words. Cheap and local
-    -- no model download, no API call."""
+    """Pick the right-most capitalized name/phrase after the transfer
+    verb (headlines put the player near the end: 'X sign [desc] Player'),
+    stripping known club/competition/outlet words. Cheap and local --
+    no model download, no API call."""
     verb_match = TRANSFER_RE.search(title)
-    verb_pos = verb_match.start() if verb_match else len(title) // 2
+    verb_pos = verb_match.end() if verb_match else len(title) // 2
 
     candidates = []
     for m in CAP_RE.finditer(title):
-        words = [w for w in m.group().split() if w.lower() not in WORD_BLOCKLIST]
+        words = []
+        for w in m.group().split():
+            base = re.sub(r"'s$", "", w.lower())
+            if base not in WORD_BLOCKLIST:
+                words.append(w)
         if not words:
             continue
-        candidates.append((abs(m.start() - verb_pos), " ".join(words)))
+        candidates.append((m.start(), " ".join(words)))
 
     if not candidates:
         return title[:120]  # last resort: keep the row, use full headline
-    candidates.sort(key=lambda x: x[0])
+
+    after = [c for c in candidates if c[0] >= verb_pos]
+    if after:
+        return after[-1][1][:120]  # right-most candidate after the verb
+    candidates.sort(key=lambda c: abs(c[0] - verb_pos))
     return candidates[0][1][:120]
 
 
