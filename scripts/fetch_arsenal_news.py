@@ -149,6 +149,7 @@ def fetch_entries():
             continue
 
         source_name = parsed.feed.get("title", feed_url)
+        print(f"{feed_url} -> {len(parsed.entries)} entries (source: {source_name})")
 
         for entry in parsed.entries:
             title = entry.get("title", "")
