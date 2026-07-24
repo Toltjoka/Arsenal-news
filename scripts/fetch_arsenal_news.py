@@ -4,6 +4,10 @@ Arsenal Transfer News Bot
 Fetches RSS feeds, keeps only Arsenal player transfer news (in/out,
 rumor or confirmed), skips injury news, and upserts into Supabase.
 
+100% free to run: pulls out player names with a capitalized-word +
+distance-to-verb heuristic (no paid LLM API, no extra dependencies),
+plus keyword rules for direction (in/out) and status (rumor/confirmed).
+
 Env vars required:
   SUPABASE_URL
   SUPABASE_SERVICE_ROLE_KEY
@@ -22,55 +26,66 @@ SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
 TABLE = "arsenal_transfer_news"
 
-# RSS feeds worth checking. Add/remove freely.
 FEEDS = [
-    "https://www.skysports.com/rss/12040", # Sky Sports transfer centre
+    "https://www.skysports.com/rss/12040",  # Sky Sports transfer centre
     "https://feeds.bbci.co.uk/sport/football/teams/arsenal/rss.xml",
     "https://www.arsenal.com/rss.xml",
     "https://www.football.london/all-about/arsenal-fc/?service=rss",
 ]
 
-# Must mention Arsenal somewhere
 ARSENAL_RE = re.compile(r"\barsenal\b", re.I)
 
-# Signals this is transfer-related (in or out)
 TRANSFER_RE = re.compile(
-    r"\b(sign(s|ing|ed)?|transfer|loan|bid|deal|medical|"
+    r"\b(sign(s|ing|ed)?|transfer|loan(ed)?|bid|deal|medical|"
     r"here we go|completes? (a )?move|agree(s|d)? terms|"
     r"linked|target|release clause|swap deal|departure|"
-    r"leaves? arsenal|joins? arsenal|exit|sold|sale)\b",
+    r"leaves?|joins?|exit(s|ing)?|sold|sale|unveil(ed|s)?)\b",
     re.I,
 )
 
-# Signals this is an injury story — hard exclude
 INJURY_RE = re.compile(
     r"\b(injur(y|ed|ies)|surgery|scan|sidelined|hamstring|"
-    r"knee|acl|acl injury|fitness concern|ruled out|"
-    r"return date|recovery|setback|torn muscle)\b",
+    r"knee|acl|fitness concern|ruled out|return date|"
+    r"recovery|setback|torn muscle)\b",
     re.I,
 )
 
-# Rough classification of rumor vs confirmed
 CONFIRMED_RE = re.compile(
     r"\b(here we go|official|confirms?|completes? (a )?move|"
     r"signs (a |his )?(contract|deal)|unveiled|announced)\b",
     re.I,
 )
 
-# Rough direction classification
+# Explicit "leaving Arsenal" signals. Anything else that matches
+# TRANSFER_RE defaults to "in" (arriving/being linked to Arsenal) --
+# the far more common case in transfer-window headlines.
 OUT_RE = re.compile(
-    r"\b(leaves? arsenal|departs? arsenal|exit(s|ing)?|"
-    r"sold to|joins? .*(from|leaving) arsenal|loan(ed)? out|"
+    r"\b(leaves? arsenal|departs? arsenal|exit(s|ing)? arsenal|"
+    r"sold (by|to)|loan(ed)? out|arsenal (release|sell|sold|loan out)|"
     r"departure)\b",
     re.I,
 )
+
+# Capitalized word(s) -- candidate names/clubs in a headline.
+CAP_RE = re.compile(r"\b[A-Z][a-zA-Z]+(?:'s)?(?:\s[A-Z][a-zA-Z]+(?:'s)?){0,2}\b")
+
+# Clubs, competitions, outlets, and stray words that show up capitalized
+# in headlines but are never the player. Extend freely -- one line each.
+WORD_BLOCKLIST = {
+    "arsenal", "arsenal's", "bournemouth", "leverkusen", "besiktas",
+    "newcastle", "leeds", "chelsea", "liverpool", "city", "united", "real",
+    "madrid", "barcelona", "psg", "bayern", "juventus", "inter", "milan",
+    "sky", "bbc", "sport", "sports", "premier", "league", "la", "liga",
+    "serie", "bundesliga", "ligue", "champions", "europa", "here", "we",
+    "go", "mikel", "arteta", "watch", "video", "report", "gossip",
+}
 
 
 def classify(title, summary):
     text = f"{title} {summary}"
     if not ARSENAL_RE.search(text):
         return None
-    if INJURY_RE.search(text) and not TRANSFER_RE.search(text):
+    if INJURY_RE.search(text) and not TRANSFER_RE.search(title):
         return None
     if not TRANSFER_RE.search(text):
         return None
@@ -80,11 +95,24 @@ def classify(title, summary):
     return direction, status
 
 
-def guess_player_name(title):
-    # crude heuristic: take text before first verb-ish keyword
-    cut = re.split(TRANSFER_RE, title, maxsplit=1)[0]
-    cut = re.sub(r"[:\-–|].*$", "", cut).strip()
-    return cut[:120] if cut else title[:120]
+def extract_player_name(title):
+    """Pick the capitalized name/phrase closest to the transfer verb,
+    stripping out known club/competition/outlet words. Cheap and local
+    -- no model download, no API call."""
+    verb_match = TRANSFER_RE.search(title)
+    verb_pos = verb_match.start() if verb_match else len(title) // 2
+
+    candidates = []
+    for m in CAP_RE.finditer(title):
+        words = [w for w in m.group().split() if w.lower() not in WORD_BLOCKLIST]
+        if not words:
+            continue
+        candidates.append((abs(m.start() - verb_pos), " ".join(words)))
+
+    if not candidates:
+        return title[:120]  # last resort: keep the row, use full headline
+    candidates.sort(key=lambda x: x[0])
+    return candidates[0][1][:120]
 
 
 def fetch_entries():
@@ -119,7 +147,7 @@ def fetch_entries():
 
             rows.append(
                 {
-                    "player_name": guess_player_name(title),
+                    "player_name": extract_player_name(title),
                     "direction": direction,
                     "status": status,
                     "headline": title[:300],
@@ -151,4 +179,6 @@ def upsert(rows):
 
 
 if __name__ == "__main__":
-    upsert(fetch_entries())
+    rows = fetch_entries()
+    print(f"Found {len(rows)} matching stories this run.")
+    upsert(rows)
