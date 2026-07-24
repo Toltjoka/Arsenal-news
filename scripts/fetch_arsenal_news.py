@@ -27,10 +27,10 @@ SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 TABLE = "arsenal_transfer_news"
 
 FEEDS = [
-    "https://www.skysports.com/rss/12040",  # Sky Sports transfer centre
     "https://feeds.bbci.co.uk/sport/football/teams/arsenal/rss.xml",
-    "https://www.arsenal.com/rss.xml",
-    "https://www.football.london/all-about/arsenal-fc/?service=rss",
+    "https://arseblog.com/feed",
+    "https://www.skysports.com/rss/11095",  # Sky Sports football (filtered by keyword)
+    "https://www.90min.com/posts.rss",       # broad football feed (filtered by keyword)
 ]
 
 ARSENAL_RE = re.compile(r"\barsenal\b", re.I)
