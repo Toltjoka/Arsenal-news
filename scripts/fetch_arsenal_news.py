@@ -16,6 +16,7 @@ Env vars required:
 import os
 import re
 import sys
+import traceback
 from datetime import datetime, timezone
 
 import feedparser
@@ -198,12 +199,40 @@ def upsert(rows):
     }
     resp = requests.post(url, headers=headers, json=rows, timeout=30)
     if resp.status_code >= 300:
-        print(f"Supabase error {resp.status_code}: {resp.text}", file=sys.stderr)
+        err = f"Supabase error {resp.status_code}: {resp.text}"
+        print(err, file=sys.stderr)
+        log_debug(err)
         sys.exit(1)
     print(f"Upserted {len(rows)} candidate rows (duplicates ignored by source_url).")
 
 
+def log_debug(message):
+    """Write a line to the bot_debug_log table so failures are visible
+    without needing GitHub Actions log access."""
+    try:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/bot_debug_log",
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+            json={"message": message[:4000]},
+            timeout=15,
+        )
+    except Exception:
+        pass  # best-effort logging only
+
+
 if __name__ == "__main__":
-    rows = fetch_entries()
-    print(f"Found {len(rows)} matching stories this run.")
-    upsert(rows)
+    try:
+        rows = fetch_entries()
+        print(f"Found {len(rows)} matching stories this run.")
+        log_debug(f"OK: found {len(rows)} matching stories this run.")
+        upsert(rows)
+    except Exception:
+        tb = traceback.format_exc()
+        print(tb, file=sys.stderr)
+        log_debug(f"ERROR:\n{tb}")
+        sys.exit(1)
