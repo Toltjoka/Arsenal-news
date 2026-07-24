@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arsenal Transfer News</title>
+<style>
+  :root {
+    --arsenal-red: #EF0107;
+    --bg: #0d0d0d;
+    --card: #1a1a1a;
+    --text: #f0f0f0;
+    --muted: #9a9a9a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px 16px 60px;
+  }
+  header {
+    max-width: 720px;
+    margin: 0 auto 20px;
+  }
+  h1 {
+    font-size: 1.5rem;
+    margin: 0 0 4px;
+    border-left: 5px solid var(--arsenal-red);
+    padding-left: 10px;
+  }
+  .sub { color: var(--muted); font-size: 0.9rem; margin-left: 15px; }
+  .filters {
+    max-width: 720px;
+    margin: 16px auto;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .filters button {
+    background: var(--card);
+    border: 1px solid #333;
+    color: var(--text);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .filters button.active {
+    background: var(--arsenal-red);
+    border-color: var(--arsenal-red);
+  }
+  main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+  .card {
+    background: var(--card);
+    border-radius: 10px;
+    padding: 14px 16px;
+    border-left: 4px solid var(--arsenal-red);
+  }
+  .card.out { border-left-color: #4a90d9; }
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+  }
+  .player { font-weight: 600; font-size: 1.02rem; }
+  .badges { display: flex; gap: 6px; }
+  .badge {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .badge.in { background: rgba(239,1,7,0.2); color: #ff6b6b; }
+  .badge.out { background: rgba(74,144,217,0.2); color: #7fb8ef; }
+  .badge.confirmed { background: rgba(60,200,120,0.2); color: #6fe0a0; }
+  .badge.rumor { background: rgba(255,180,40,0.2); color: #ffcf6b; }
+  .headline { font-size: 0.95rem; color: #ddd; margin-bottom: 6px; }
+  .meta { font-size: 0.78rem; color: var(--muted); }
+  .meta a { color: var(--muted); }
+  #status { text-align: center; color: var(--muted); padding: 30px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Arsenal Transfer News <span class="sub">rykten &amp; bekräftat, in &amp; ut</span></h1>
+</header>
+
+<div class="filters">
+  <button data-filter="all" class="active">Alla</button>
+  <button data-filter="in">In</button>
+  <button data-filter="out">Ut</button>
+  <button data-filter="confirmed">Bekräftat</button>
+  <button data-filter="rumor">Rykten</button>
+</div>
+
+<main id="list"></main>
+<div id="status">Laddar...</div>
+
+<script>
+  const SUPABASE_URL = "https://fajtxhxwvnuhfkytdcqi.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhanR4aHh3dm51aGZreXRkY3FpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTk3NjMsImV4cCI6MjA5OTMzNTc2M30.b7rMbVl_56fbRSESVO8HT5XuGoeshtY4jozfZ9T8Aqg";
+
+  let allRows = [];
+  let currentFilter = "all";
+
+  async function loadNews() {
+    const statusEl = document.getElementById("status");
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/arsenal_transfer_news?select=*&order=created_at.desc&limit=100`,
+        {
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+        }
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      allRows = await res.json();
+      render();
+    } catch (err) {
+      statusEl.textContent = "Kunde inte hämta nyheter just nu.";
+      console.error(err);
+    }
+  }
+
+  function render() {
+    const list = document.getElementById("list");
+    const statusEl = document.getElementById("status");
+    const rows = allRows.filter((r) => {
+      if (currentFilter === "all") return true;
+      if (currentFilter === "in" || currentFilter === "out") return r.direction === currentFilter;
+      if (currentFilter === "confirmed" || currentFilter === "rumor") return r.status === currentFilter;
+      return true;
+    });
+
+    if (rows.length === 0) {
+      list.innerHTML = "";
+      statusEl.textContent = "Inga nyheter matchar filtret ännu.";
+      return;
+    }
+    statusEl.textContent = "";
+
+    list.innerHTML = rows
+      .map((r) => {
+        const date = r.published_at || r.created_at;
+        const dateStr = date
+          ? new Date(date).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })
+          : "";
+        return `
+          <div class="card ${r.direction}">
+            <div class="card-top">
+              <span class="player">${escapeHtml(r.player_name)}</span>
+              <span class="badges">
+                <span class="badge ${r.direction}">${r.direction === "in" ? "In" : "Ut"}</span>
+                <span class="badge ${r.status}">${r.status === "confirmed" ? "Bekräftat" : "Rykte"}</span>
+              </span>
+            </div>
+            <div class="headline">${escapeHtml(r.headline)}</div>
+            <div class="meta">${escapeHtml(r.source_name)} · <a href="${r.source_url}" target="_blank" rel="noopener">läs mer</a> · ${dateStr}</div>
+          </div>`;
+      })
+      .join("");
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str || "";
+    return div.innerHTML;
+  }
+
+  document.querySelectorAll(".filters button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".filters button").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentFilter = btn.dataset.filter;
+      render();
+    });
+  });
+
+  loadNews();
+  setInterval(loadNews, 5 * 60 * 1000); // refresh every 5 min
+</script>
+
+</body>
+</html>
