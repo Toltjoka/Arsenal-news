@@ -190,7 +190,7 @@ def upsert(rows):
         print("No new matching stories this run.")
         return
 
-    url = f"{SUPABASE_URL}/rest/v1/{TABLE}"
+    url = f"{SUPABASE_URL}/rest/v1/{TABLE}?on_conflict=source_url"
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
